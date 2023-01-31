@@ -445,8 +445,9 @@ static void gaussian_blur(Float* dest, ptrdiff_t destStride, const Float* srce, 
  * @param [in]  imgStep     Distance between a pixel of the image and the one immediatelt to its right.
  * @param [in]  imgStride   Distance between a pixel of the image and the one immediately below it.
  */
+template <typename T>
 static void retrieve_tile(Float* tile, uint32_t tileWidth, uint32_t tileHeight, size_t tileStride, uint32_t margin, uint32_t x, uint32_t y,
-                          const uint8_t* imgData, uint32_t imgWidth, uint32_t imgHeight, ptrdiff_t imgStep, ptrdiff_t imgStride) RMGR_NOEXCEPT
+                          const T* imgData, uint32_t imgWidth, uint32_t imgHeight, ptrdiff_t imgStep, ptrdiff_t imgStride) RMGR_NOEXCEPT
 {
     assert(tileStride >= tileWidth + 2*margin);
     assert(0<=x && x<imgWidth);
@@ -464,7 +465,7 @@ static void retrieve_tile(Float* tile, uint32_t tileWidth, uint32_t tileHeight, 
     const int32_t sx2 = std::min(dx2, int32_t(imgWidth));
     const int32_t sy2 = std::min(dy2, int32_t(imgHeight));
 
-    const uint8_t* s       = imgData + sx1 * imgStep + sy1 * imgStride;
+    const T*       s       = imgData + sx1 * imgStep + sy1 * imgStride;
     Float*         d       = tile + tileStride * (sy1 - dy1);
     const size_t   sStride = imgStride  - imgStep * (sx2 - sx1);
     const size_t   dStride = tileStride - (tileWidth + 2*margin);
@@ -690,8 +691,16 @@ static double process_tile(const TileParams& tp, const GlobalParams& gp) RMGR_NO
 
     Float* a = tp.buffers[1] + offsetToTopLeft;
     Float* b = tp.buffers[2] + offsetToTopLeft;
-    retrieve_tile(a, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgA.topLeft, gp.width, gp.height, gp.imgA.step, gp.imgA.stride);
-    retrieve_tile(b, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgB.topLeft, gp.width, gp.height, gp.imgB.step, gp.imgB.stride);
+    if (gp.imgA.topLeft != NULL) {
+        assert( gp.imgB.topLeft != NULL && gp.imgA.floatTopLeft == NULL && gp.imgB.floatTopLeft == NULL );
+        retrieve_tile(a, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgA.topLeft, gp.width, gp.height, gp.imgA.step, gp.imgA.stride);
+        retrieve_tile(b, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgB.topLeft, gp.width, gp.height, gp.imgB.step, gp.imgB.stride);
+    }
+    else {
+        assert( gp.imgA.floatTopLeft != NULL && gp.imgB.floatTopLeft != NULL && gp.imgA.topLeft == NULL && gp.imgB.topLeft == NULL );
+        retrieve_tile(a, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgA.floatTopLeft, gp.width, gp.height, gp.imgA.step, gp.imgA.stride);
+        retrieve_tile(b, tileWidth, tileHeight, tileStride, gp.gaussianRadius, tp.tileX, tp.tileY, gp.imgB.floatTopLeft, gp.width, gp.height, gp.imgB.step, gp.imgB.stride);
+    }
 
     Float* a2 = tp.buffers[3] + offsetToTopLeft;
     Float* b2 = tp.buffers[4] + offsetToTopLeft;

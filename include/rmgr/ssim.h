@@ -452,7 +452,8 @@ typedef int (*ThreadPoolFct)(void* context, ThreadFct fct, void* const args[], u
  */
 struct ImgParams
 {
-    const uint8_t* topLeft; ///< Pointer to the considered channel of the image's top-left pixel
+    const uint8_t* topLeft;      ///< Pointer to the considered channel of the image's top-left pixel
+    const float*   floatTopLeft; ///< Pointer to the considered channel of the image's top-left pixel (float)
     ptrdiff_t      step;    ///< The distance (in bytes) between a pixel and the one immediately to its right
     ptrdiff_t      stride;  ///< The distance (in bytes) between a pixel and the one immediately below it
 
@@ -472,6 +473,24 @@ struct ImgParams
         topLeft = data + channelNum;
         step    = channelCount;
         stride  = imgStride;
+    }
+
+    /**
+     * @brief Sets the parameters for an interleaved image
+     *
+     * @param [in] data         Pointer to the image's top-left pixel
+     * @param [in] imgStride    The distance (in bytes) between a pixel and the one immediately below it.
+     *                          This is negative for bottom-up images.
+     * @param [in] channelNum   The channel whose SSIM is to be computed
+     * @param [in] channelCount How many channels the image contains
+     */
+    void init_interleaved(const float* data, ptrdiff_t imgStride, unsigned channelCount, unsigned channelNum) RMGR_NOEXCEPT
+    {
+        assert(data != NULL);
+        assert(channelNum < channelCount);
+        floatTopLeft = data + channelNum;
+        step         = channelCount;
+        stride       = imgStride;
     }
 
     /**
