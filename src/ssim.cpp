@@ -901,9 +901,10 @@ float compute_ssim(const Params& params) RMGR_NOEXCEPT
     const Float  c1 = Float((k1 * L) * (k1 * L));
     const Float  c2 = Float((k2 * L) * (k2 * L));
 
-    if (params.imgA.topLeft==NULL || params.imgB.topLeft==NULL)
+    if ((params.imgA.topLeft==NULL || params.imgB.topLeft==NULL || params.imgA.floatTopLeft!=NULL || params.imgB.floatTopLeft!=NULL) &&
+        (params.imgA.topLeft!=NULL || params.imgB.topLeft!=NULL || params.imgA.floatTopLeft==NULL || params.imgB.floatTopLeft==NULL))
     {
-        RMGR_SSIM_REPORT_ERROR("Invalid parameter: imgA.topLeft or imgB.topLeft is NULL\n");
+        RMGR_SSIM_REPORT_ERROR("Invalid parameters: imgA.topLeft or imgB.topLeft or imgA.floatTopLeft or imgB.floatTopLeft is wrongly set\n");
         return -EINVAL;
     }
 

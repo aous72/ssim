@@ -75,10 +75,11 @@ static void print_help(FILE* file)
 {
     fprintf(file, "Usage: rmgr-ssim [options] img1 img2 [map]\n"
                   "Options:\n"
-                  "  -#  Compute SSIM only for channel #\n"
-                  "  -y  Compute SSIM on luminance\n"
-                  "      For images with <= 2 channels, only channel 0's SSIM will be computed\n"
-                  "      For images with >= 3 channels, first three channels are converted from RGB to Y\n\n");
+                  "  -#   Compute SSIM only for channel #\n"
+                  "  -y   Compute SSIM on luminance, using BT.709\n"
+                  "       For images with <= 2 channels, only channel 0's SSIM will be computed\n"
+                  "       For images with >= 3 channels, first three channels are converted from RGB to Y\n"
+                  "  -yuv Compute SSIM on yuv components, by converting RGB to YCbCr, using BT.601\n\n");
 }
 
 
@@ -102,8 +103,8 @@ static stbi_uc* load_img(const TCHAR* path, int* width, int* height, int* channe
     return img;
 }
 
-
-static float compute_ssim(const stbi_uc* img1, const stbi_uc* img2, int width, int height, int imgChannelCount, int imgChannel, float* map, int mapChannelCount, int mapChannel)
+template<typename T>
+static float compute_ssim(const T* img1, const T* img2, int width, int height, int imgChannelCount, int imgChannel, float* map, int mapChannelCount, int mapChannel)
 {
     assert(imgChannel < imgChannelCount);
     assert(map == NULL || mapChannel < mapChannelCount);
@@ -124,7 +125,7 @@ static float compute_ssim(const stbi_uc* img1, const stbi_uc* img2, int width, i
 }
 
 
-static int compute_ssims(const stbi_uc* img1, const stbi_uc* img2, int width, int height, int channelCount, int onlyChannel, bool luminance, float* map, int mapChannelCount)
+static int compute_ssims(const stbi_uc* img1, const stbi_uc* img2, int width, int height, int channelCount, int onlyChannel, bool luminance, bool convert_to_yuv, float* map, int mapChannelCount)
 {
     if (channelCount < 3 && luminance)
         onlyChannel = 0;
@@ -182,6 +183,82 @@ static int compute_ssims(const stbi_uc* img1, const stbi_uc* img2, int width, in
             return EXIT_FAILURE;
         printf("% 7.4f\n", ssim);
     }
+    else if (convert_to_yuv)
+    {
+        assert(map == NULL || mapChannelCount == 3);
+
+        float* lum1 = new float[width * height * channelCount];
+        float* lum2 = new float[width * height * channelCount];
+        if (lum1 == NULL || lum2 == NULL)
+        {
+            delete[] lum1;
+            delete[] lum2;
+            fprintf(stderr, "Not enough memory\n");
+            return EXIT_FAILURE;
+        }
+
+        // Constants from BT.601
+        const double dALPHA_RF = 0.299;
+        const double dALPHA_GF = 0.587;
+        const double dALPHA_BF = 0.114;
+        const double dBETA_CbF = 0.5 / (1.0 - dALPHA_BF);
+        const double dBETA_CrF = 0.5 / (1.0 - dALPHA_RF);
+        const float ALPHA_RF = (float)dALPHA_RF;
+        const float ALPHA_GF = (float)dALPHA_GF;
+        const float ALPHA_BF = (float)dALPHA_BF;
+        const float BETA_CbF = (float)dBETA_CbF;
+        const float BETA_CrF = (float)dBETA_CrF;
+        const float mid_point = 127.5f; // this is weird, but because the algorithm expects a dynamic range of
+                                        // 0 to 255, the middle point becomes 127.5
+
+        // Convert to luminance
+        const unsigned pixelCount = width * height;
+        const stbi_uc* s1 = img1;
+        const stbi_uc* s2 = img2;
+        float*         d1 = lum1;
+        float*         d2 = lum2;
+        float r, g, b, y, cb, cr;
+        for (unsigned i=0; i<pixelCount; ++i)
+        {
+            r  = (float)*s1++;
+            g  = (float)*s1++;
+            b  = (float)*s1++;
+            y  = ALPHA_RF * r + ALPHA_GF * g + ALPHA_BF * b;
+            cb = BETA_CbF * (b - y) + mid_point;
+            cr = BETA_CrF * (r - y) + mid_point;
+            *d1++ = y;
+            *d1++ = cb;
+            *d1++ = cr;
+            r  = (float)*s2++;
+            g  = (float)*s2++;
+            b  = (float)*s2++;
+            y  = ALPHA_RF * r + ALPHA_GF * g + ALPHA_BF * b;
+            cb = BETA_CbF * (b - y) + mid_point;
+            cr = BETA_CrF * (r - y) + mid_point;
+            *d2++ = y;
+            *d2++ = cb;
+            *d2++ = cr;
+        }
+
+        float sum = 0.0f, weighted_average = 0.0f;
+        for (int c=0; c<channelCount; ++c)
+        {
+            float ssim = compute_ssim(lum1, lum2, width, height, channelCount, c, map, mapChannelCount, (map!=NULL)?c: 0);
+            if (rmgr::ssim::get_errno(ssim) != 0)
+                return EXIT_FAILURE;
+            printf("Channel %u: % 7.4f\n", c, ssim);
+            sum += ssim;
+            if (c == 0)
+                weighted_average += 0.8 * ssim;
+            else if (c == 1 || c == 2)
+                weighted_average += 0.1 * ssim;
+        }
+        printf("Average  : % 7.4f\n", sum/channelCount);
+        printf("Weighted Average  : % 7.4f\n", weighted_average);
+
+        delete[] lum2;
+        delete[] lum1;
+    }
     else
     {
         float average = 0.0f;
@@ -216,6 +293,7 @@ extern "C" int _tmain(int argc, TCHAR* argv[])
 
     int  onlyChannel = -1;
     bool luminance   = false;
+    bool convert_to_yuv = false;
     int  filesIndex   = 1;
 
     // Parse options
@@ -223,15 +301,17 @@ extern "C" int _tmain(int argc, TCHAR* argv[])
     {
         const TCHAR* option = argv[1];
         if (_tcscmp(option, _T("-0")) == 0)
-            onlyChannel = 0;
+            onlyChannel     = 0;
         else if (_tcscmp(option, _T("-1")) == 0)
-            onlyChannel = 1;
+            onlyChannel     = 1;
         else if (_tcscmp(option, _T("-2")) == 0)
-            onlyChannel = 2;
+            onlyChannel     = 2;
         else if (_tcscmp(option, _T("-3")) == 0)
-            onlyChannel = 3;
+            onlyChannel     = 3;
         else if (_tcscmp(option, _T("-y")) == 0)
-            luminance   = true;
+            luminance       = true;
+        else if (_tcscmp(option, _T("-yuv")) == 0)
+            convert_to_yuv  = true;
         else
         {
             _ftprintf(stderr, _T("Unknown option: %s\n"), option);
@@ -279,8 +359,11 @@ extern "C" int _tmain(int argc, TCHAR* argv[])
         fprintf(stderr, "Images do not have the same number of channels: %u vs %u\n", channelCount1, channelCount2);
     else if (onlyChannel >=0 && onlyChannel >= channelCount1)
         fprintf(stderr, "Cannot compute SSIM for channel %u, images have only %u channels\n", onlyChannel, channelCount1);
+    else if (convert_to_yuv && onlyChannel >=0)
+        fprintf(stderr, "To compute SSIM in the yuv color space, you need a file with at least 3 channels. "
+                        "Do not use the \"-#\" or \"-y\" options\n");
     else
-        retval = compute_ssims(img1, img2, width1, height1, channelCount1, onlyChannel, luminance, map, mapChannelCount);
+        retval = compute_ssims(img1, img2, width1, height1, channelCount1, onlyChannel, luminance, convert_to_yuv, map, mapChannelCount);
 
     if (retval == EXIT_SUCCESS && mapPath != NULL)
     {
